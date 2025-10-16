@@ -12,7 +12,7 @@ export const handleEditMediaFormSubmit = async (e, mediaId) => {
   const submitButton = form.querySelector('button[type="submit"]');
   
   submitButton.disabled = true;
-  submitButton.textContent = 'Saving...';
+  submitButton.innerHTML = `<div class="animate-spin rounded-full h-5 w-5 border-b-2 border-white mx-auto"></div>`;
 
   const formData = new FormData(form);
   const tags = formData.get('tags').split(',').map(tag => tag.trim()).filter(tag => tag);
@@ -55,7 +55,7 @@ export async function renderEditMediaModal(container, mediaId) {
     const modalHtml = `
       <div id="edit-media-modal" class="modal-container fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
         <div class="bg-surface rounded-lg p-6 sm:p-8 w-full max-w-md relative animate-fade-in-up">
-          <button data-action="close-modal" class="absolute top-4 right-4 text-on-surface hover:text-primary transition-colors">
+          <button data-action="close-modal" aria-label="Close edit post modal" class="absolute top-4 right-4 text-on-surface hover:text-primary transition-colors">
             <div class="w-6 h-6">${X}</div>
           </button>
           
@@ -87,7 +87,7 @@ export async function renderEditMediaModal(container, mediaId) {
               <input type="text" name="tags" value="${(media.tags || []).join(', ')}" placeholder="e.g., portrait, event, outdoor" class="w-full bg-background border border-surface rounded-md p-2 text-on-background focus:ring-primary focus:border-primary">
               <p class="text-xs text-on-surface/70 mt-1">Separate tags with commas.</p>
             </div>
-            <button type="submit" class="w-full bg-primary text-background font-bold py-2 rounded-md hover:bg-opacity-90 transition disabled:opacity-50">Save Changes</button>
+            <button type="submit" class="w-full bg-primary text-background font-bold py-2 rounded-md hover:bg-opacity-90 transition disabled:opacity-50 h-10">Save Changes</button>
           </form>
         </div>
       </div>

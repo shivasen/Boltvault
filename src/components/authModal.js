@@ -102,7 +102,7 @@ export function renderAuthModal(container) {
   const modalHtml = `
     <div id="auth-modal" class="modal-container fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
       <div class="bg-surface rounded-lg p-6 sm:p-8 w-full max-w-sm relative animate-fade-in-up">
-        <button data-action="close-modal" class="absolute top-4 right-4 text-on-surface hover:text-primary transition-colors">
+        <button data-action="close-modal" aria-label="Close authentication modal" class="absolute top-4 right-4 text-on-surface hover:text-primary transition-colors">
           <div class="w-6 h-6">${X}</div>
         </button>
         

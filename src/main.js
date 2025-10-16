@@ -2,7 +2,7 @@ import { renderSidebar, renderBottomNav } from './components/sidebar.js';
 import { renderGallery } from './components/gallery.js';
 import { renderCharacterProfile } from './components/characterProfile.js';
 import { renderLandingPage } from './components/landingPage.js';
-import { supabase } from './lib/supabaseClient.js';
+import { supabase, supabaseInitializationError } from './lib/supabaseClient.js';
 import { getCharacters, getMedia, deleteMedia, deleteCharacter, searchMedia } from './lib/dataService.js';
 import { renderAuthModal, handleAuthFormSubmit, renderLoginForm, renderSignUpForm } from './components/authModal.js';
 import { renderCreateMenuModal } from './components/createMenuModal.js';
@@ -12,30 +12,79 @@ import { renderFilterModal, handleFilterFormSubmit, handleResetFilters } from '.
 import { renderMediaViewerModal } from './components/mediaViewerModal.js';
 import { renderEditCharacterModal, handleEditCharacterFormSubmit } from './components/editCharacterModal.js';
 import { renderEditMediaModal, handleEditMediaFormSubmit } from './components/editMediaModal.js';
+import { renderConfirmationModal } from './components/confirmationModal.js';
+import { renderCharacterList } from './components/characterList.js';
 import { showToast } from './components/toast.js';
+import { debounce } from './utils/debounce.js';
+import { initBackToTopButton } from './components/backToTopButton.js';
+
+// Early exit if Supabase isn't configured
+if (supabaseInitializationError) {
+    document.body.innerHTML = `
+        <div class="flex items-center justify-center min-h-screen bg-background text-on-background p-4">
+            <div class="max-w-2xl text-center">
+                <h1 class="text-2xl font-bold text-red-400 mb-4">Application Configuration Error</h1>
+                <p class="text-lg text-on-surface mb-2">${supabaseInitializationError}</p>
+                <p class="text-on-surface/70">If you are the administrator, please add the <code class="bg-surface px-1 py-0.5 rounded-md">VITE_SUPABASE_URL</code> and <code class="bg-surface px-1 py-0.5 rounded-md">VITE_SUPABASE_ANON_KEY</code> environment variables in your hosting provider's settings (e.g., Cloudflare Pages, Netlify), then redeploy.</p>
+            </div>
+        </div>
+    `;
+    throw new Error(supabaseInitializationError);
+}
 
 const sidebarContainer = document.getElementById('sidebar-container');
 const bottomNavContainer = document.getElementById('bottom-nav-container');
 const mainContent = document.getElementById('main-content');
 const modalContainer = document.getElementById('modal-container');
+const backToTopContainer = document.getElementById('back-to-top-container');
 
 let currentFilters = {};
 let currentSearchTerm = '';
+let currentPage = 0;
+let isFetchingMore = false;
+let hasMoreMedia = true;
 
-const renderMainGallery = async (user) => {
-  renderGallery(mainContent, null, null, {}, null); // Render skeleton first
+const resetPagination = () => {
+    currentPage = 0;
+    isFetchingMore = false;
+    hasMoreMedia = true;
+};
+
+const renderMainGallery = async (isLoadMore = false) => {
+  if (!isLoadMore) {
+    resetPagination();
+    renderGallery(mainContent, null, null, {}, null, {});
+  }
+
+  if (isFetchingMore || !hasMoreMedia) return;
+  isFetchingMore = true;
+  
+  const loadMoreBtn = document.getElementById('load-more-btn');
+  if (loadMoreBtn) {
+    loadMoreBtn.disabled = true;
+    loadMoreBtn.innerHTML = `<div class="animate-spin rounded-full h-5 w-5 border-b-2 border-white mx-auto"></div>`;
+  }
+
   try {
-    let media;
-    const characters = await getCharacters(); // Always need characters for cards
+    let mediaResponse;
+    const characters = await getCharacters();
+    
     if (currentSearchTerm) {
-      media = await searchMedia(currentSearchTerm);
+      const searchResults = await searchMedia(currentSearchTerm);
+      mediaResponse = { data: searchResults, hasMore: false };
     } else {
-      media = await getMedia(currentFilters);
+      mediaResponse = await getMedia({ ...currentFilters, page: currentPage });
     }
-    renderGallery(mainContent, media, characters, currentFilters, currentSearchTerm);
+    
+    hasMoreMedia = mediaResponse.hasMore;
+    renderGallery(mainContent, mediaResponse.data, characters, currentFilters, currentSearchTerm, { isLoadMore, hasMore: hasMoreMedia });
+    currentPage++;
+
   } catch (error) {
     mainContent.innerHTML = `<div class="text-center p-10 text-red-400">Error fetching data: ${error.message}</div>`;
     showToast(`Error fetching data: ${error.message}`, 'error');
+  } finally {
+    isFetchingMore = false;
   }
 };
 
@@ -45,63 +94,74 @@ const router = async () => {
   const user = session?.user ?? null;
 
   if (!user) {
-    // User is not logged in, show landing page
     renderLandingPage(mainContent);
     sidebarContainer.innerHTML = '';
     bottomNavContainer.innerHTML = '';
-    mainContent.className = 'flex-1 w-full'; // Reset classes for full-width landing page
+    mainContent.className = 'flex-1 w-full';
     return;
   }
 
-  // User is logged in, show the main app
   mainContent.className = 'flex-1 md:ml-64 p-4 sm:p-6 lg:p-8';
   renderSidebar(sidebarContainer, user);
-  renderBottomNav(bottomNavContainer);
+  renderBottomNav(bottomNavContainer, user);
 
   if (hash.startsWith('#/character/')) {
     const characterId = hash.split('/')[2];
     await renderCharacterProfile(mainContent, characterId);
+  } else if (hash === '#/characters') {
+    await renderCharacterList(mainContent);
   } else {
-    await renderMainGallery(user);
+    await renderMainGallery();
   }
 };
 
+const debouncedSearch = debounce(async (searchTerm) => {
+    currentSearchTerm = searchTerm.trim();
+    currentFilters = {};
+    if (window.location.hash !== '') {
+        window.location.hash = '';
+    } else {
+        await router();
+    }
+}, 300);
+
 document.addEventListener('DOMContentLoaded', async () => {
+  initBackToTopButton(backToTopContainer);
   await router();
 
-  window.addEventListener('hashchange', async (e) => {
-    if (e.newURL.endsWith('#') || e.newURL.endsWith('/')) {
-        currentFilters = {};
-        currentSearchTerm = '';
-    }
-    await router();
-  });
+  window.addEventListener('hashchange', router);
 
   supabase.auth.onAuthStateChange(async (_event, session) => {
     currentFilters = {}; 
     currentSearchTerm = '';
-    window.location.hash = ''; // Go to home on auth change
-    await router();
+    resetPagination();
+    
+    if (window.location.hash !== '') {
+        window.location.hash = '';
+    } else {
+        await router();
+    }
+    
     if (session?.user && document.querySelector('.modal-container')) {
         document.querySelector('.modal-container').remove();
     }
   });
 
-  document.addEventListener('datachanged', async () => {
-    await router();
-  });
+  document.addEventListener('datachanged', router);
 
   document.addEventListener('filterschanged', async (e) => {
     currentFilters = e.detail;
     currentSearchTerm = '';
-    await router();
+    if (window.location.hash !== '') {
+        window.location.hash = '';
+    } else {
+        await router();
+    }
   });
 
-  // --- Central Event Delegation ---
   const app = document.getElementById('app');
 
   app.addEventListener('click', async (e) => {
-    // Handle overlay click to close modal
     if (e.target.classList.contains('modal-container')) {
         e.target.remove();
         return;
@@ -110,8 +170,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const actionTarget = e.target.closest('[data-action]');
     if (!actionTarget) return;
 
-    // Prevent default for all actions except navigation links that scroll
-    if (!actionTarget.getAttribute('href')?.startsWith('#')) {
+    // Prevent default for all actions except internal page scroll links
+    if (!actionTarget.getAttribute('href')?.startsWith('#features')) {
       e.preventDefault();
     }
     
@@ -163,31 +223,50 @@ document.addEventListener('DOMContentLoaded', async () => {
         case 'navigate-home':
             window.location.hash = '';
             break;
+        case 'navigate-characters':
+            window.location.hash = '#/characters';
+            break;
+        case 'navigate-character-profile':
+             window.location.hash = `#/character/${id}`;
+            break;
         case 'view-media':
             await renderMediaViewerModal(modalContainer, id);
             break;
+        case 'load-more-media':
+            await renderMainGallery(true);
+            break;
         case 'delete-media':
-            if (confirm('Are you sure you want to delete this media post? This action cannot be undone.')) {
-                try {
-                    await deleteMedia(id);
-                    showToast('Media post deleted successfully.');
-                    actionTarget.closest('.modal-container')?.remove();
-                    document.dispatchEvent(new CustomEvent('datachanged'));
-                } catch (error) {
-                    showToast(`Error deleting post: ${error.message}`, 'error');
+            renderConfirmationModal({
+                title: 'Delete Post',
+                message: 'Are you sure you want to delete this post? This action cannot be undone.',
+                confirmText: 'Delete',
+                onConfirm: async () => {
+                    try {
+                        await deleteMedia(id);
+                        showToast('Media post deleted successfully.');
+                        actionTarget.closest('.modal-container')?.remove();
+                        document.dispatchEvent(new CustomEvent('datachanged'));
+                    } catch (error) {
+                        showToast(`Error deleting post: ${error.message}`, 'error');
+                    }
                 }
-            }
+            });
             break;
         case 'delete-character':
-            if (confirm('Are you sure you want to delete this character? All their media posts will be unassigned. This action cannot be undone.')) {
-                try {
-                    await deleteCharacter(id);
-                    showToast('Character deleted successfully.');
-                    window.location.hash = ''; // Go back to home
-                } catch (error) {
-                    showToast(`Error deleting character: ${error.message}`, 'error');
+            renderConfirmationModal({
+                title: 'Delete Character',
+                message: 'Are you sure you want to delete this character? All media will be unassigned. This cannot be undone.',
+                confirmText: 'Delete',
+                onConfirm: async () => {
+                    try {
+                        await deleteCharacter(id);
+                        showToast('Character deleted successfully.');
+                        window.location.hash = '';
+                    } catch (error) {
+                        showToast(`Error deleting character: ${error.message}`, 'error');
+                    }
                 }
-            }
+            });
             break;
         case 'clear-search':
             currentSearchTerm = '';
@@ -229,13 +308,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             handleFilterFormSubmit(e);
             break;
         case 'search':
-            const searchTerm = new FormData(form).get('search').trim();
-            currentSearchTerm = searchTerm;
-            currentFilters = {};
-            window.location.hash = '';
-            if (window.location.hash === '') {
-                await router();
-            }
             break;
         case 'edit-character':
             await handleEditCharacterFormSubmit(e, id);
@@ -244,5 +316,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             await handleEditMediaFormSubmit(e, id);
             break;
     }
+  });
+
+  app.addEventListener('input', (e) => {
+    const form = e.target.closest('form[data-form="search"]');
+    if (!form) return;
+
+    const searchTerm = new FormData(form).get('search');
+    debouncedSearch(searchTerm);
   });
 });

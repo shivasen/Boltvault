@@ -6,7 +6,7 @@ const createMediaElement = (mediaItem) => {
   if (mediaItem.type === 'video') {
     return `<video src="${mediaItem.url}" class="w-full h-full object-cover" muted loop playsinline title="${mediaItem.name}"></video>`;
   }
-  return `<img src="${mediaItem.url}" alt="${mediaItem.name}" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110">`;
+  return `<img src="${mediaItem.url}" alt="${mediaItem.name}" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" loading="lazy">`;
 };
 
 const createMediaCard = (mediaItem) => {
@@ -46,17 +46,17 @@ export async function renderCharacterProfile(container, characterId) {
                 <div class="flex flex-col md:flex-row items-center">
                     <div class="w-32 h-32 md:w-40 md:h-40 rounded-full overflow-hidden bg-surface flex-shrink-0 mb-4 md:mb-0 md:mr-8">
                         ${character.profile_picture_url 
-                            ? `<img src="${character.profile_picture_url}" alt="${character.name}" class="w-full h-full object-cover">`
+                            ? `<img src="${character.profile_picture_url}" alt="${character.name}" class="w-full h-full object-cover" loading="lazy">`
                             : `<div class="w-full h-full flex items-center justify-center text-on-surface/50">${User}</div>`
                         }
                     </div>
                     <div class="text-center md:text-left">
                         <div class="flex items-center justify-center md:justify-start gap-4">
                             <h2 class="text-3xl font-bold text-on-background">${character.name}</h2>
-                            <button data-action="show-edit-character-modal" data-id="${character.id}" class="bg-surface text-on-surface hover:bg-primary hover:text-background p-2 rounded-lg transition-colors">
+                            <button data-action="show-edit-character-modal" data-id="${character.id}" aria-label="Edit character" class="bg-surface text-on-surface hover:bg-primary hover:text-background p-2 rounded-lg transition-colors">
                                 <div class="w-5 h-5">${Edit}</div>
                             </button>
-                             <button data-action="delete-character" data-id="${character.id}" class="bg-red-500/10 text-red-400 hover:bg-red-500/20 p-2 rounded-lg transition-colors">
+                             <button data-action="delete-character" data-id="${character.id}" aria-label="Delete character" class="bg-red-500/10 text-red-400 hover:bg-red-500/20 p-2 rounded-lg transition-colors">
                                 <div class="w-5 h-5">${Trash2}</div>
                             </button>
                         </div>

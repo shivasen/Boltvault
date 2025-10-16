@@ -1,5 +1,7 @@
 import { supabase } from './supabaseClient.js';
 
+const PAGE_SIZE = 20; // Number of items to fetch per page
+
 /**
  * Fetches all characters for the current user.
  * @returns {Promise<Array>} A promise that resolves to an array of characters.
@@ -112,17 +114,17 @@ export async function getCharacterById(id) {
 }
 
 /**
- * Fetches all media items for the current user, with optional filtering and sorting.
+ * Fetches all media items for the current user, with optional filtering, sorting, and pagination.
  * @param {object} options - Filtering and sorting options.
- * @returns {Promise<Array>} A promise that resolves to an array of media items.
+ * @returns {Promise<{data: Array, hasMore: boolean}>} A promise that resolves to an object with media items and a flag indicating if more exist.
  */
 export async function getMedia(options = {}) {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return [];
+    if (!user) return { data: [], hasMore: false };
 
     let query = supabase
         .from('media')
-        .select('*')
+        .select('*', { count: 'exact' }) // Request count for pagination
         .eq('user_id', user.id);
 
     // Filtering
@@ -141,14 +143,22 @@ export async function getMedia(options = {}) {
     const sortAsc = options.sortDirection === 'asc';
     query = query.order(sortBy, { ascending: sortAsc });
 
-    const { data, error } = await query;
+    // Pagination
+    const page = options.page || 0;
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    query = query.range(from, to);
+
+    const { data, error, count } = await query;
     
     if (error) {
         console.error('Error fetching media:', error);
         throw error;
     }
 
-    return data;
+    const hasMore = data ? (from + data.length) < count : false;
+
+    return { data: data || [], hasMore };
 }
 
 /**
