@@ -132,14 +132,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('hashchange', router);
 
   supabase.auth.onAuthStateChange(async (_event, session) => {
-    currentFilters = {}; 
-    currentSearchTerm = '';
-    resetPagination();
-    
-    if (window.location.hash !== '') {
-        window.location.hash = '';
-    } else {
-        await router();
+    const user = session?.user;
+    const wasLoggedIn = document.body.dataset.loggedIn === 'true';
+    const isLoggedIn = !!user;
+
+    // Only re-route if the auth state has actually changed
+    if (wasLoggedIn !== isLoggedIn) {
+        document.body.dataset.loggedIn = isLoggedIn;
+        currentFilters = {}; 
+        currentSearchTerm = '';
+        resetPagination();
+        
+        // If logging out, redirect to home.
+        if (_event === 'SIGNED_OUT') {
+            window.location.href = '/';
+            return;
+        }
+
+        if (window.location.hash !== '') {
+            window.location.hash = '';
+        } else {
+            await router();
+        }
     }
     
     if (session?.user && document.querySelector('.modal-container')) {
@@ -188,8 +202,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             renderSignUpForm();
             break;
         case 'logout':
-            await supabase.auth.signOut();
             showToast('You have been logged out.');
+            await supabase.auth.signOut();
+            window.location.href = '/';
             break;
         case 'show-create-menu':
             renderCreateMenuModal(modalContainer);
