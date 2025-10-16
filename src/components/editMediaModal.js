@@ -16,17 +16,21 @@ export const handleEditMediaFormSubmit = async (e, mediaId) => {
 
   const formData = new FormData(form);
   const tags = formData.get('tags').split(',').map(tag => tag.trim()).filter(tag => tag);
+  const isEmbed = formData.get('source_type') === 'embed';
 
   const mediaData = {
     character_id: formData.get('character_id'),
     name: formData.get('name'),
-    url: formData.get('url'),
-    type: formData.get('type'),
     tags: tags,
+    is_embed: isEmbed,
+    url: isEmbed ? formData.get('embed_code') : formData.get('direct_url'),
+    type: isEmbed ? null : formData.get('type'),
+    thumbnail_url: isEmbed ? formData.get('thumbnail_url') : mediaData.thumbnail_url, // Keep old if unchanged
   };
 
   try {
     if (!mediaData.character_id) throw new Error('Please select a character.');
+    if (!mediaData.url) throw new Error('URL or Embed Code is required.');
     
     await updateMedia(mediaId, mediaData);
     showToast('Media updated successfully!', 'success');
@@ -71,28 +75,67 @@ export async function renderEditMediaModal(container, mediaId) {
               <label for="name" class="block text-sm font-medium text-on-surface mb-1">Post Title</label>
               <input type="text" name="name" required value="${media.name}" class="w-full bg-background border border-surface rounded-md p-2 text-on-background focus:ring-primary focus:border-primary">
             </div>
-            <div>
-              <label for="url" class="block text-sm font-medium text-on-surface mb-1">Media URL</label>
-              <input type="url" name="url" required value="${media.url}" placeholder="https://example.com/media.mp4" class="w-full bg-background border border-surface rounded-md p-2 text-on-background focus:ring-primary focus:border-primary">
+
+            <!-- Source Type Toggle -->
+            <div class="flex items-center justify-center gap-4 pt-2">
+              <span class="text-sm font-medium text-on-surface">Direct Link</span>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="source-type-toggle" name="source_type" value="embed" class="sr-only peer" ${media.is_embed ? 'checked' : ''}>
+                <input type="hidden" name="source_type" value="${media.is_embed ? 'embed' : 'direct'}">
+                <div class="w-11 h-6 bg-gray-600 rounded-full peer peer-focus:ring-2 peer-focus:ring-primary/50 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+              </label>
+              <span class="text-sm font-medium text-on-surface">Embed Code</span>
             </div>
-             <div>
-              <label class="block text-sm font-medium text-on-surface mb-1">Media Type</label>
-              <div class="flex gap-4">
-                  <label class="flex items-center"><input type="radio" name="type" value="image" ${media.type === 'image' ? 'checked' : ''} class="mr-2 bg-background border-surface text-primary focus:ring-primary"> Image</label>
-                  <label class="flex items-center"><input type="radio" name="type" value="video" ${media.type === 'video' ? 'checked' : ''} class="mr-2 bg-background border-surface text-primary focus:ring-primary"> Video</label>
+
+            <!-- Direct Link Fields -->
+            <div id="direct-link-fields" class="${media.is_embed ? 'hidden' : ''} space-y-4">
+              <div>
+                <label for="direct_url" class="block text-sm font-medium text-on-surface mb-1">Media URL</label>
+                <input type="url" name="direct_url" value="${!media.is_embed ? media.url : ''}" placeholder="https://example.com/media.mp4" class="w-full bg-background border border-surface rounded-md p-2 text-on-background focus:ring-primary focus:border-primary">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-on-surface mb-1">Media Type</label>
+                <div class="flex gap-4">
+                    <label class="flex items-center"><input type="radio" name="type" value="image" ${media.type === 'image' ? 'checked' : ''} class="mr-2 bg-background border-surface text-primary focus:ring-primary"> Image</label>
+                    <label class="flex items-center"><input type="radio" name="type" value="video" ${media.type === 'video' ? 'checked' : ''} class="mr-2 bg-background border-surface text-primary focus:ring-primary"> Video</label>
+                </div>
               </div>
             </div>
+
+            <!-- Embed Fields -->
+            <div id="embed-fields" class="${!media.is_embed ? 'hidden' : ''} space-y-4">
+              <div>
+                <label for="embed_code" class="block text-sm font-medium text-on-surface mb-1">Embed Code</label>
+                <textarea name="embed_code" rows="3" placeholder='<iframe src="..."></iframe>' class="w-full bg-background border border-surface rounded-md p-2 text-on-background focus:ring-primary focus:border-primary">${media.is_embed ? media.url : ''}</textarea>
+              </div>
+              <div>
+                <label for="thumbnail_url" class="block text-sm font-medium text-on-surface mb-1">Thumbnail URL</label>
+                <input type="url" name="thumbnail_url" value="${media.thumbnail_url || ''}" placeholder="https://example.com/preview.jpg" class="w-full bg-background border border-surface rounded-md p-2 text-on-background focus:ring-primary focus:border-primary">
+                <p class="text-xs text-on-surface/70 mt-1">Provide an image URL for the gallery preview.</p>
+              </div>
+            </div>
+
             <div>
               <label for="tags" class="block text-sm font-medium text-on-surface mb-1">Tags</label>
               <input type="text" name="tags" value="${(media.tags || []).join(', ')}" placeholder="e.g., portrait, event, outdoor" class="w-full bg-background border border-surface rounded-md p-2 text-on-background focus:ring-primary focus:border-primary">
               <p class="text-xs text-on-surface/70 mt-1">Separate tags with commas.</p>
             </div>
-            <button type="submit" class="w-full bg-primary text-background font-bold py-2 rounded-md hover:bg-opacity-90 transition disabled:opacity-50 h-10">Save Changes</button>
+            <button type="submit" class="w-full bg-primary text-background font-bold py-2 rounded-md hover:bg-opacity-90 transition disabled:opacity-50 h-10 !mt-6">Save Changes</button>
           </form>
         </div>
       </div>
     `;
     container.innerHTML = modalHtml;
+
+    // Attach event listener for the toggle
+    const toggle = document.getElementById('source-type-toggle');
+    const hiddenInput = toggle.nextElementSibling;
+    toggle.addEventListener('change', () => {
+        hiddenInput.value = toggle.checked ? 'embed' : 'direct';
+        document.getElementById('direct-link-fields').classList.toggle('hidden', toggle.checked);
+        document.getElementById('embed-fields').classList.toggle('hidden', !toggle.checked);
+    });
+
   } catch (error) {
     showToast(`Error loading data: ${error.message}`, 'error');
     container.innerHTML = '';

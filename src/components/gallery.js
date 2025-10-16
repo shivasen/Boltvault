@@ -1,7 +1,15 @@
-import { Filter, Play, User, X } from 'lucide-static';
+import { Filter, Play, User, X, Code } from 'lucide-static';
 import { renderGallerySkeleton } from './skeleton.js';
 
 const createMediaElement = (mediaItem) => {
+  if (mediaItem.is_embed) {
+    if (mediaItem.thumbnail_url) {
+      return `<img src="${mediaItem.thumbnail_url}" alt="${mediaItem.name}" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110" loading="lazy">`;
+    }
+    // Fallback for embeds without a thumbnail
+    return `<div class="w-full h-full bg-background flex items-center justify-center text-on-surface/30"><div class="w-16 h-16">${Code}</div></div>`;
+  }
+
   if (mediaItem.type === 'video') {
     return `<video src="${mediaItem.url}" class="w-full h-full object-cover" muted loop playsinline title="${mediaItem.name}"></video>`;
   }
@@ -11,12 +19,14 @@ const createMediaElement = (mediaItem) => {
 const createMediaCard = (mediaItem, characters) => {
   const character = characters.find(c => c.id === mediaItem.character_id);
   
+  const icon = mediaItem.is_embed ? Code : (mediaItem.type === 'video' ? Play : '');
+
   return `
     <div data-action="view-media" data-id="${mediaItem.id}" class="media-card group relative aspect-square bg-surface rounded-lg overflow-hidden cursor-pointer animate-fade-in-up">
       ${createMediaElement(mediaItem)}
       <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-opacity duration-300 flex items-center justify-center">
         <div class="text-white text-center p-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-          ${mediaItem.type === 'video' ? `<div class="w-8 h-8 mx-auto mb-2">${Play}</div>` : ''}
+          ${icon ? `<div class="w-8 h-8 mx-auto mb-2">${icon}</div>` : ''}
           <h3 class="font-bold text-lg truncate">${mediaItem.name}</h3>
           ${character ? `
             <a href="#/character/${character?.id}" data-action="navigate-character-profile" data-id="${character.id}" class="relative z-10 flex items-center justify-center text-sm text-gray-300 mt-1 hover:underline">
