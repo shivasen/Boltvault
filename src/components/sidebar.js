@@ -1,8 +1,9 @@
-import { Home, Search, PlusSquare, LogIn, LogOut, Filter as FilterIcon, Users } from 'lucide-static';
+import { Home, Search, PlusSquare, LogIn, LogOut, Filter as FilterIcon, Users, Settings } from 'lucide-static';
 
 const mainNavs = [
   { id: 'home-btn', icon: Home, text: 'Home', action: 'navigate-home' },
   { id: 'characters-btn', icon: Users, text: 'Characters', action: 'navigate-characters' },
+  { id: 'settings-btn', icon: Settings, text: 'Settings', action: 'navigate-settings' },
 ];
 
 const actionNavs = [

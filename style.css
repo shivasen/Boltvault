@@ -2,6 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-background: #f9f9f9;
+  --color-surface: #ffffff;
+  --color-primary: #6200ee;
+  --color-secondary: #03dac6;
+  --color-on-background: #121212;
+  --color-on-surface: #333333;
+}
+
+html.dark {
+  --color-background: #121212;
+  --color-surface: #1e1e1e;
+  --color-primary: #bb86fc;
+  --color-secondary: #03dac6;
+  --color-on-background: #ffffff;
+  --color-on-surface: #e0e0e0;
+}
+
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

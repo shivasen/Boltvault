@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
@@ -7,12 +8,12 @@ export default {
   theme: {
     extend: {
       colors: {
-        'background': '#121212',
-        'surface': '#1e1e1e',
-        'primary': '#bb86fc',
-        'secondary': '#03dac6',
-        'on-background': '#ffffff',
-        'on-surface': '#e0e0e0',
+        'background': 'var(--color-background)',
+        'surface': 'var(--color-surface)',
+        'primary': 'var(--color-primary)',
+        'secondary': 'var(--color-secondary)',
+        'on-background': 'var(--color-on-background)',
+        'on-surface': 'var(--color-on-surface)',
       },
       keyframes: {
         'fade-in-up': {

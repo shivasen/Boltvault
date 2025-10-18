@@ -2,6 +2,86 @@ import { supabase } from './supabaseClient.js';
 
 const PAGE_SIZE = 20; // Number of items to fetch per page
 
+// --- Profile Functions ---
+
+/**
+ * Fetches the public profile for the current user.
+ * @returns {Promise<object>} A promise that resolves to the profile object.
+ */
+export async function getProfile() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not logged in.');
+
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+    
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+        console.error('Error fetching profile:', error);
+        throw error;
+    }
+
+    return data;
+}
+
+/**
+ * Updates the user's profile and auth metadata.
+ * @param {object} profileData - The data to update.
+ * @returns {Promise<void>}
+ */
+export async function updateProfile(profileData) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('You must be logged in to update your profile.');
+
+    const { username, full_name, avatar_url } = profileData;
+
+    // 1. Update the public.profiles table
+    const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+            username,
+            full_name,
+            avatar_url,
+            updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id);
+
+    if (profileError) {
+        console.error('Error updating profile:', profileError);
+        throw profileError;
+    }
+
+    // 2. Update the user's auth metadata (e.g., for avatar display in Supabase UI)
+    const { error: userError } = await supabase.auth.updateUser({
+        data: {
+            avatar_url: avatar_url,
+            full_name: full_name,
+        }
+    });
+
+    if (userError) {
+        // This is less critical, so we'll log it but not throw an error
+        console.warn('Could not update auth user metadata:', userError.message);
+    }
+}
+
+/**
+ * Deletes the current user's account by calling a stored procedure.
+ * @returns {Promise<void>}
+ */
+export async function deleteUserAccount() {
+    const { error } = await supabase.rpc('delete_user');
+    if (error) {
+        console.error('Error deleting user account:', error);
+        throw error;
+    }
+}
+
+
+// --- Character Functions ---
+
 /**
  * Fetches all characters for the current user.
  * @returns {Promise<Array>} A promise that resolves to an array of characters.
@@ -113,6 +193,8 @@ export async function getCharacterById(id) {
     return data;
 }
 
+// --- Media Functions ---
+
 /**
  * Fetches all media items for the current user, with optional filtering, sorting, and pagination.
  * @param {object} options - Filtering and sorting options.
@@ -162,7 +244,7 @@ export async function getMedia(options = {}) {
 }
 
 /**
- * Searches media titles, tags, and associated character names.
+ * Searches media using the fuzzy search RPC function.
  * @param {string} searchTerm - The term to search for.
  * @returns {Promise<Array>} A promise that resolves to an array of matching media items.
  */
@@ -170,36 +252,10 @@ export async function searchMedia(searchTerm) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user || !searchTerm) return [];
 
-    // 1. Find characters matching the search term to get their IDs
-    const { data: matchingCharacters, error: charError } = await supabase
-        .from('characters')
-        .select('id')
-        .eq('user_id', user.id)
-        .ilike('name', `%${searchTerm}%`);
+    const { data, error } = await supabase.rpc('search_media_fuzzy', {
+        search_term: searchTerm
+    });
 
-    if (charError) {
-        console.error('Error searching characters:', charError);
-        throw charError;
-    }
-    const matchingCharacterIds = matchingCharacters.map(c => c.id);
-
-    // 2. Build the .or() condition string
-    const orConditions = [
-        `name.ilike.%${searchTerm}%`,      // Search in media title
-        `tags.cs.{${searchTerm}}`          // Search in tags array
-    ];
-    if (matchingCharacterIds.length > 0) {
-        // Add condition to find media linked to the matched characters
-        orConditions.push(`character_id.in.(${matchingCharacterIds.join(',')})`);
-    }
-
-    // 3. Execute the main query on the media table
-    const { data, error } = await supabase
-        .from('media')
-        .select('*')
-        .eq('user_id', user.id)
-        .or(orConditions.join(','));
-    
     if (error) {
         console.error('Error searching media:', error);
         throw error;
@@ -273,17 +329,43 @@ export async function getMediaByCharacterId(characterId) {
 
 
 /**
- * Creates a new media item for the current user.
- * @param {object} mediaData - The data for the new media item.
+ * Creates a new media item for the current user. Handles file uploads.
+ * @param {object} mediaData - The data for the new media item, may include a `file` object.
  * @returns {Promise<object>} A promise that resolves to the created media item.
  */
 export async function createMedia(mediaData) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('You must be logged in to create media.');
 
+    const { file, ...restOfMediaData } = mediaData;
+
+    if (file) {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}.${fileExt}`;
+        const filePath = `${user.id}/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from('media')
+            .upload(filePath, file);
+
+        if (uploadError) {
+            console.error('Error uploading file:', uploadError);
+            throw uploadError;
+        }
+
+        const { data: publicUrlData } = supabase.storage
+            .from('media')
+            .getPublicUrl(filePath);
+
+        restOfMediaData.url = publicUrlData.publicUrl;
+        restOfMediaData.storage_path = filePath;
+        restOfMediaData.type = file.type.startsWith('image') ? 'image' : 'video';
+        restOfMediaData.is_embed = false;
+    }
+
     const { data, error } = await supabase
         .from('media')
-        .insert([{ ...mediaData, user_id: user.id }])
+        .insert([{ ...restOfMediaData, user_id: user.id }])
         .select()
         .single();
 
@@ -296,7 +378,7 @@ export async function createMedia(mediaData) {
 }
 
 /**
- * Updates an existing media item.
+ * Updates an existing media item. Handles file uploads and cleanup.
  * @param {string} id - The ID of the media item to update.
  * @param {object} mediaData - The new data for the media item.
  * @returns {Promise<object>} A promise that resolves to the updated media item.
@@ -305,9 +387,54 @@ export async function updateMedia(id, mediaData) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('You must be logged in to update media.');
 
+    const { file, ...restOfMediaData } = mediaData;
+    let oldStoragePath = null;
+
+    // Fetch the existing media item to check for a storage_path
+    const { data: existingMedia } = await supabase
+        .from('media')
+        .select('storage_path')
+        .eq('id', id)
+        .single();
+
+    if (existingMedia && existingMedia.storage_path) {
+        oldStoragePath = existingMedia.storage_path;
+    }
+
+    if (file) { // A new file is being uploaded
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}.${fileExt}`;
+        const newFilePath = `${user.id}/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage.from('media').upload(newFilePath, file);
+        if (uploadError) throw uploadError;
+
+        const { data: publicUrlData } = supabase.storage.from('media').getPublicUrl(newFilePath);
+
+        restOfMediaData.url = publicUrlData.publicUrl;
+        restOfMediaData.storage_path = newFilePath;
+        restOfMediaData.type = file.type.startsWith('image') ? 'image' : 'video';
+        restOfMediaData.is_embed = false;
+        restOfMediaData.thumbnail_url = null;
+
+        // If there was an old file, remove it from storage
+        if (oldStoragePath) {
+            const { error: removeError } = await supabase.storage.from('media').remove([oldStoragePath]);
+            if (removeError) console.warn('Could not remove old file from storage:', removeError);
+        }
+    } else if (restOfMediaData.source_type !== 'upload' && oldStoragePath) {
+        // Switched from Upload to Link/Embed, so delete the old file
+        const { error: removeError } = await supabase.storage.from('media').remove([oldStoragePath]);
+        if (removeError) console.warn('Could not remove old file from storage:', removeError);
+        
+        restOfMediaData.storage_path = null;
+    }
+    
+    delete restOfMediaData.source_type; // Don't save this to the DB
+
     const { data, error } = await supabase
         .from('media')
-        .update(mediaData)
+        .update(restOfMediaData)
         .eq('id', id)
         .eq('user_id', user.id)
         .select()
@@ -320,8 +447,10 @@ export async function updateMedia(id, mediaData) {
     return data;
 }
 
+
 /**
- * Deletes a media item by its ID.
+ * Deletes a single media item by its ID.
+ * The associated file in storage is deleted automatically by a database trigger.
  * @param {string} id - The ID of the media item to delete.
  * @returns {Promise<void>}
  */
@@ -333,10 +462,31 @@ export async function deleteMedia(id) {
         .from('media')
         .delete()
         .eq('id', id)
-        .eq('user_id', user.id); // RLS handles this, but belt-and-suspenders.
+        .eq('user_id', user.id);
 
     if (error) {
         console.error('Error deleting media:', error);
+        throw error;
+    }
+}
+
+/**
+ * Deletes multiple media items using a batch RPC call.
+ * The associated files in storage are deleted automatically by a database trigger.
+ * @param {string[]} mediaIds - An array of media item IDs to delete.
+ * @returns {Promise<void>}
+ */
+export async function deleteMultipleMedia(mediaIds) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('You must be logged in to delete media.');
+    if (!mediaIds || mediaIds.length === 0) return;
+
+    const { error } = await supabase.rpc('delete_media_batch', {
+        media_ids: mediaIds
+    });
+
+    if (error) {
+        console.error('Error batch deleting media:', error);
         throw error;
     }
 }

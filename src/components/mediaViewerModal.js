@@ -4,27 +4,27 @@ import { showToast } from './toast.js';
 
 const createMediaElement = (mediaItem) => {
     if (mediaItem.is_embed) {
-      // For embeds, we create a container and inject the iframe HTML.
-      // The aspect-video class helps maintain a 16:9 ratio for most video embeds.
-      const embedContainer = document.createElement('div');
-      embedContainer.className = 'w-full h-full aspect-video bg-black';
-      // This is safe as the user is providing their own embed codes.
-      embedContainer.innerHTML = mediaItem.url; 
+      // For embeds, we create a responsive container that maintains aspect ratio.
+      const wrapper = document.createElement('div');
+      // Use aspect-video for 16:9, and constrain size to fit within the viewport, similar to other media types.
+      wrapper.className = 'relative w-full max-w-full h-auto max-h-[80vh] aspect-video bg-black';
+
+      // Inject the user-provided embed code. This is safe as users provide their own content.
+      wrapper.innerHTML = mediaItem.url; 
       
-      // Make sure the iframe inside is responsive
-      const iframe = embedContainer.querySelector('iframe');
+      const iframe = wrapper.querySelector('iframe');
       if (iframe) {
-        iframe.style.width = '100%';
-        iframe.style.height = '100%';
+        // Style the iframe to fill the responsive wrapper.
         iframe.style.position = 'absolute';
         iframe.style.top = '0';
         iframe.style.left = '0';
+        iframe.style.width = '100%';
+        iframe.style.height = '100%';
+        iframe.setAttribute('allowfullscreen', '');
+        // Add more permissions for better compatibility with providers like YouTube
+        iframe.setAttribute('allow', 'autoplay; fullscreen; picture-in-picture; encrypted-media');
       }
       
-      const wrapper = document.createElement('div');
-      wrapper.className = 'relative w-full pb-[56.25%]'; // 16:9 aspect ratio padding-bottom trick
-      wrapper.appendChild(embedContainer);
-
       return wrapper.outerHTML;
     }
 
@@ -46,7 +46,7 @@ export async function renderMediaViewerModal(container, mediaId) {
         const modalHtml = `
             <div id="media-viewer-modal" class="modal-container fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4 animate-fade-in-up">
                 <div class="flex flex-col lg:flex-row w-full h-full max-w-screen-xl max-h-screen">
-                    <div class="flex-1 flex items-center justify-center bg-black relative">
+                    <div class="flex-1 flex items-center justify-center bg-black relative p-4">
                         ${createMediaElement(mediaItem)}
                         <button data-action="close-modal" aria-label="Close media viewer" class="absolute top-4 right-4 text-white bg-black/50 rounded-full p-2 hover:bg-black/80 transition-colors z-10">
                             <div class="w-6 h-6">${X}</div>

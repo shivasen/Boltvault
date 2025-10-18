@@ -1,6 +1,6 @@
 import { getCharacters, createMedia } from '../lib/dataService.js';
 import { showToast } from './toast.js';
-import { X } from 'lucide-static';
+import { X, UploadCloud, Link, Code } from 'lucide-static';
 
 const closeModal = () => {
   document.getElementById('media-modal')?.remove();
@@ -16,21 +16,34 @@ export const handleMediaFormSubmit = async (e) => {
 
   const formData = new FormData(form);
   const tags = formData.get('tags').split(',').map(tag => tag.trim()).filter(tag => tag);
-  const isEmbed = formData.get('source_type') === 'embed';
+  const sourceType = formData.get('source_type');
 
   const mediaData = {
     character_id: formData.get('character_id'),
     name: formData.get('name'),
     tags: tags,
-    is_embed: isEmbed,
-    url: isEmbed ? formData.get('embed_code') : formData.get('direct_url'),
-    type: isEmbed ? null : formData.get('type'),
-    thumbnail_url: isEmbed ? formData.get('thumbnail_url') : null,
   };
 
   try {
     if (!mediaData.character_id) throw new Error('Please select a character.');
-    if (!mediaData.url) throw new Error('URL or Embed Code is required.');
+
+    if (sourceType === 'upload') {
+        const fileInput = form.querySelector('#media_file');
+        const file = fileInput.files[0];
+        if (!file) throw new Error('Please select a file to upload.');
+        mediaData.file = file;
+    } else if (sourceType === 'direct') {
+        mediaData.url = formData.get('direct_url');
+        mediaData.type = formData.get('type');
+        mediaData.is_embed = false;
+        if (!mediaData.url) throw new Error('Media URL is required.');
+    } else if (sourceType === 'embed') {
+        mediaData.url = formData.get('embed_code');
+        mediaData.thumbnail_url = formData.get('thumbnail_url');
+        mediaData.is_embed = true;
+        mediaData.type = null;
+        if (!mediaData.url) throw new Error('Embed Code is required.');
+    }
     
     await createMedia(mediaData);
     showToast('Media created successfully!', 'success');
@@ -44,25 +57,65 @@ export const handleMediaFormSubmit = async (e) => {
   }
 };
 
-const setupSourceToggle = () => {
-    const toggle = document.getElementById('source-type-toggle');
-    if (!toggle) return;
-
-    const directLinkFields = document.getElementById('direct-link-fields');
-    const embedFields = document.getElementById('embed-fields');
-
-    const updateVisibility = () => {
-        if (toggle.checked) { // Embed
-            directLinkFields.classList.add('hidden');
-            embedFields.classList.remove('hidden');
-        } else { // Direct Link
-            directLinkFields.classList.remove('hidden');
-            embedFields.classList.add('hidden');
-        }
+const setupModalInteractivity = () => {
+    // Source Type Control
+    const sourceControl = document.getElementById('source-type-control');
+    const sourceButtons = sourceControl.querySelectorAll('.source-btn');
+    const hiddenInput = document.querySelector('input[name="source_type"]');
+    
+    const fieldsets = {
+        upload: document.getElementById('upload-fields'),
+        direct: document.getElementById('direct-link-fields'),
+        embed: document.getElementById('embed-fields'),
     };
 
-    toggle.addEventListener('change', updateVisibility);
-    updateVisibility(); // Initial call
+    sourceButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const sourceType = button.dataset.source;
+            hiddenInput.value = sourceType;
+
+            sourceButtons.forEach(btn => {
+                const isActive = btn.dataset.source === sourceType;
+                btn.classList.toggle('bg-primary', isActive);
+                btn.classList.toggle('text-background', isActive);
+                btn.classList.toggle('text-on-surface', !isActive);
+            });
+
+            Object.values(fieldsets).forEach(fs => fs.classList.add('hidden'));
+            fieldsets[sourceType].classList.remove('hidden');
+        });
+    });
+
+    // Set initial state for source control
+    document.querySelector('.source-btn[data-source="upload"]').click();
+
+    // File Dropzone
+    const dropzone = document.getElementById('file-dropzone');
+    const fileInput = document.getElementById('media_file');
+    const fileNameEl = document.getElementById('file-name');
+
+    dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.classList.add('border-primary', 'bg-primary/10');
+    });
+    dropzone.addEventListener('dragleave', () => {
+        dropzone.classList.remove('border-primary', 'bg-primary/10');
+    });
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('border-primary', 'bg-primary/10');
+        if (e.dataTransfer.files.length) {
+            fileInput.files = e.dataTransfer.files;
+            fileNameEl.textContent = fileInput.files[0].name;
+        }
+    });
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files.length) {
+            fileNameEl.textContent = fileInput.files[0].name;
+        } else {
+            fileNameEl.textContent = '';
+        }
+    });
 };
 
 export async function renderMediaModal(container) {
@@ -108,19 +161,40 @@ export async function renderMediaModal(container) {
             <input type="text" name="name" required class="w-full bg-background border border-surface rounded-md p-2 text-on-background focus:ring-primary focus:border-primary">
           </div>
 
-          <!-- Source Type Toggle -->
-          <div class="flex items-center justify-center gap-4 pt-2">
-            <span class="text-sm font-medium text-on-surface">Direct Link</span>
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" id="source-type-toggle" name="source_type" value="embed" class="sr-only peer">
-              <input type="hidden" name="source_type" value="direct"> <!-- Default value -->
-              <div class="w-11 h-6 bg-gray-600 rounded-full peer peer-focus:ring-2 peer-focus:ring-primary/50 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-            </label>
-            <span class="text-sm font-medium text-on-surface">Embed Code</span>
+          <!-- Source Type Control -->
+          <div>
+            <label class="block text-sm font-medium text-on-surface mb-2">Source Type</label>
+            <div id="source-type-control" class="grid grid-cols-3 gap-1 rounded-lg bg-background p-1">
+                <button type="button" data-source="upload" class="source-btn flex items-center justify-center gap-2 p-2 rounded-md text-sm font-semibold transition"><div class="w-4 h-4">${UploadCloud}</div>Upload</button>
+                <button type="button" data-source="direct" class="source-btn flex items-center justify-center gap-2 p-2 rounded-md text-sm font-semibold transition"><div class="w-4 h-4">${Link}</div>Link</button>
+                <button type="button" data-source="embed" class="source-btn flex items-center justify-center gap-2 p-2 rounded-md text-sm font-semibold transition"><div class="w-4 h-4">${Code}</div>Embed</button>
+            </div>
+            <input type="hidden" name="source_type" value="upload">
+          </div>
+
+          <!-- Upload Fields -->
+          <div id="upload-fields" class="space-y-4">
+            <div>
+              <label for="media_file" class="block text-sm font-medium text-on-surface mb-1 sr-only">Media File</label>
+              <div id="file-dropzone" class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-dashed border-surface rounded-md transition-colors">
+                <div class="space-y-1 text-center">
+                  <div class="w-12 h-12 mx-auto text-on-surface/30">${UploadCloud}</div>
+                  <div class="flex text-sm text-on-surface/70">
+                    <label for="media_file" class="relative cursor-pointer bg-surface rounded-md font-medium text-primary hover:text-opacity-80 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary px-1">
+                      <span>Upload a file</span>
+                      <input id="media_file" name="media_file" type="file" class="sr-only" accept="image/*,video/*">
+                    </label>
+                    <p class="pl-1">or drag and drop</p>
+                  </div>
+                  <p class="text-xs text-on-surface/50">Image or Video (Max 50MB)</p>
+                  <p id="file-name" class="text-sm font-medium text-primary pt-2"></p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Direct Link Fields -->
-          <div id="direct-link-fields" class="space-y-4">
+          <div id="direct-link-fields" class="hidden space-y-4">
             <div>
               <label for="direct_url" class="block text-sm font-medium text-on-surface mb-1">Media URL</label>
               <input type="url" name="direct_url" placeholder="https://example.com/media.mp4" class="w-full bg-background border border-surface rounded-md p-2 text-on-background focus:ring-primary focus:border-primary">
@@ -159,16 +233,5 @@ export async function renderMediaModal(container) {
   `;
   container.innerHTML = modalHtml;
   
-  // Attach event listener for the toggle
-  const toggle = document.getElementById('source-type-toggle');
-  const hiddenInput = toggle.nextElementSibling;
-  toggle.addEventListener('change', () => {
-      hiddenInput.value = toggle.checked ? 'embed' : 'direct';
-      document.getElementById('direct-link-fields').classList.toggle('hidden', toggle.checked);
-      document.getElementById('embed-fields').classList.toggle('hidden', !toggle.checked);
-  });
-  
-  // Set initial state
-  document.getElementById('direct-link-fields').classList.remove('hidden');
-  document.getElementById('embed-fields').classList.add('hidden');
+  setupModalInteractivity();
 }

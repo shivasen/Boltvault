@@ -1,9 +1,9 @@
 import { renderSidebar, renderBottomNav } from './components/sidebar.js';
-import { renderGallery } from './components/gallery.js';
+import { renderGallery, renderBulkActionBar } from './components/gallery.js';
 import { renderCharacterProfile } from './components/characterProfile.js';
 import { renderLandingPage } from './components/landingPage.js';
 import { supabase, supabaseInitializationError } from './lib/supabaseClient.js';
-import { getCharacters, getMedia, deleteMedia, deleteCharacter, searchMedia } from './lib/dataService.js';
+import { getCharacters, getMedia, deleteMedia, deleteCharacter, searchMedia, deleteUserAccount, deleteMultipleMedia } from './lib/dataService.js';
 import { renderAuthModal, handleAuthFormSubmit, renderLoginForm, renderSignUpForm } from './components/authModal.js';
 import { renderCreateMenuModal } from './components/createMenuModal.js';
 import { renderCharacterModal, handleCharacterFormSubmit } from './components/characterModal.js';
@@ -14,9 +14,12 @@ import { renderEditCharacterModal, handleEditCharacterFormSubmit } from './compo
 import { renderEditMediaModal, handleEditMediaFormSubmit } from './components/editMediaModal.js';
 import { renderConfirmationModal } from './components/confirmationModal.js';
 import { renderCharacterList } from './components/characterList.js';
+import { renderSettingsPage, handleProfileFormSubmit } from './components/settingsPage.js';
+import { renderChangePasswordModal, handleChangePasswordSubmit } from './components/changePasswordModal.js';
 import { showToast } from './components/toast.js';
 import { debounce } from './utils/debounce.js';
 import { initBackToTopButton } from './components/backToTopButton.js';
+import { initTheme } from './lib/theme.js';
 
 // Early exit if Supabase isn't configured
 if (supabaseInitializationError) {
@@ -37,18 +40,41 @@ const bottomNavContainer = document.getElementById('bottom-nav-container');
 const mainContent = document.getElementById('main-content');
 const modalContainer = document.getElementById('modal-container');
 const backToTopContainer = document.getElementById('back-to-top-container');
+const bulkActionBarContainer = document.getElementById('bulk-action-bar-container');
 
+// --- State ---
 let currentFilters = {};
 let currentSearchTerm = '';
 let currentPage = 0;
 let isFetchingMore = false;
 let hasMoreMedia = true;
+let isSelectMode = false;
+let selectedItems = new Set();
+let galleryMedia = [];
+let galleryCharacters = [];
 
 const resetPagination = () => {
     currentPage = 0;
     isFetchingMore = false;
     hasMoreMedia = true;
+    galleryMedia = [];
 };
+
+const resetSelectMode = () => {
+    isSelectMode = false;
+    selectedItems.clear();
+    renderBulkActionBar(bulkActionBarContainer, 0);
+};
+
+const rerenderCurrentGalleryView = () => {
+    renderGallery(mainContent, galleryMedia, galleryCharacters, currentFilters, currentSearchTerm, {
+        isLoadMore: false,
+        hasMore: hasMoreMedia,
+        isSelectMode,
+        selectedItems
+    });
+    renderBulkActionBar(bulkActionBarContainer, selectedItems.size);
+}
 
 const renderMainGallery = async (isLoadMore = false) => {
   if (!isLoadMore) {
@@ -68,6 +94,7 @@ const renderMainGallery = async (isLoadMore = false) => {
   try {
     let mediaResponse;
     const characters = await getCharacters();
+    galleryCharacters = characters;
     
     if (currentSearchTerm) {
       const searchResults = await searchMedia(currentSearchTerm);
@@ -77,7 +104,14 @@ const renderMainGallery = async (isLoadMore = false) => {
     }
     
     hasMoreMedia = mediaResponse.hasMore;
-    renderGallery(mainContent, mediaResponse.data, characters, currentFilters, currentSearchTerm, { isLoadMore, hasMore: hasMoreMedia });
+    galleryMedia = isLoadMore ? [...galleryMedia, ...mediaResponse.data] : mediaResponse.data;
+    
+    renderGallery(mainContent, mediaResponse.data, characters, currentFilters, currentSearchTerm, { 
+        isLoadMore, 
+        hasMore: hasMoreMedia,
+        isSelectMode,
+        selectedItems
+    });
     currentPage++;
 
   } catch (error) {
@@ -89,6 +123,7 @@ const renderMainGallery = async (isLoadMore = false) => {
 };
 
 const router = async () => {
+  resetSelectMode();
   const hash = window.location.hash;
   const { data: { session } } = await supabase.auth.getSession();
   const user = session?.user ?? null;
@@ -110,7 +145,10 @@ const router = async () => {
     await renderCharacterProfile(mainContent, characterId);
   } else if (hash === '#/characters') {
     await renderCharacterList(mainContent);
-  } else {
+  } else if (hash === '#/settings') {
+    await renderSettingsPage(mainContent);
+  }
+  else {
     await renderMainGallery();
   }
 };
@@ -121,11 +159,12 @@ const debouncedSearch = debounce(async (searchTerm) => {
     if (window.location.hash !== '') {
         window.location.hash = '';
     } else {
-        await router();
+        await renderMainGallery();
     }
 }, 300);
 
 document.addEventListener('DOMContentLoaded', async () => {
+  initTheme();
   initBackToTopButton(backToTopContainer);
   await router();
 
@@ -136,14 +175,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const wasLoggedIn = document.body.dataset.loggedIn === 'true';
     const isLoggedIn = !!user;
 
-    // Only re-route if the auth state has actually changed
     if (wasLoggedIn !== isLoggedIn) {
         document.body.dataset.loggedIn = isLoggedIn;
         currentFilters = {}; 
         currentSearchTerm = '';
         resetPagination();
+        resetSelectMode();
         
-        // If logging out, redirect to home.
         if (_event === 'SIGNED_OUT') {
             window.location.href = '/';
             return;
@@ -161,7 +199,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  document.addEventListener('datachanged', router);
+  document.addEventListener('datachanged', renderMainGallery);
 
   document.addEventListener('filterschanged', async (e) => {
     currentFilters = e.detail;
@@ -169,7 +207,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (window.location.hash !== '') {
         window.location.hash = '';
     } else {
-        await router();
+        await renderMainGallery();
     }
   });
 
@@ -184,7 +222,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const actionTarget = e.target.closest('[data-action]');
     if (!actionTarget) return;
 
-    // Prevent default for all actions except internal page scroll links
     if (!actionTarget.getAttribute('href')?.startsWith('#features')) {
       e.preventDefault();
     }
@@ -193,63 +230,85 @@ document.addEventListener('DOMContentLoaded', async () => {
     const id = actionTarget.dataset.id;
 
     switch (action) {
-        case 'show-login-modal':
-            renderAuthModal(modalContainer);
-            renderLoginForm();
-            break;
-        case 'show-signup-modal':
-            renderAuthModal(modalContainer);
-            renderSignUpForm();
-            break;
+        // --- Navigation & Modals ---
+        case 'navigate-home': window.location.hash = ''; break;
+        case 'navigate-characters': window.location.hash = '#/characters'; break;
+        case 'navigate-settings': window.location.hash = '#/settings'; break;
+        case 'navigate-character-profile': window.location.hash = `#/character/${id}`; break;
+        case 'show-login-modal': renderAuthModal(modalContainer); renderLoginForm(); break;
+        case 'show-signup-modal': renderAuthModal(modalContainer); renderSignUpForm(); break;
+        case 'show-create-menu': renderCreateMenuModal(modalContainer); break;
+        case 'close-modal': actionTarget.closest('.modal-container')?.remove(); break;
+        case 'show-signup-form': renderSignUpForm(); break;
+        case 'show-login-form': renderLoginForm(); break;
+        case 'show-character-modal': actionTarget.closest('.modal-container')?.remove(); renderCharacterModal(modalContainer); break;
+        case 'show-media-modal': actionTarget.closest('.modal-container')?.remove(); await renderMediaModal(modalContainer); break;
+        case 'show-filter-modal': await renderFilterModal(modalContainer, currentFilters); break;
+        case 'show-edit-character-modal': await renderEditCharacterModal(modalContainer, id); break;
+        case 'show-edit-media-modal': await renderEditMediaModal(modalContainer, id); break;
+        case 'show-change-password-modal': renderChangePasswordModal(modalContainer); break;
+        
+        // --- Auth ---
         case 'logout':
             showToast('You have been logged out.');
             await supabase.auth.signOut();
             window.location.href = '/';
             break;
-        case 'show-create-menu':
-            renderCreateMenuModal(modalContainer);
+
+        // --- Data Views & Filtering ---
+        case 'view-media': await renderMediaViewerModal(modalContainer, id); break;
+        case 'load-more-media': await renderMainGallery(true); break;
+        case 'reset-filters': handleResetFilters(); break;
+        case 'clear-all-filters': document.dispatchEvent(new CustomEvent('filterschanged', { detail: {} })); break;
+        case 'clear-search':
+            currentSearchTerm = '';
+            const searchInput = document.querySelector('form[data-form="search"] input');
+            if (searchInput) searchInput.value = '';
+            await renderMainGallery();
             break;
-        case 'close-modal':
-            actionTarget.closest('.modal-container')?.remove();
+
+        // --- Bulk Actions ---
+        case 'toggle-select-mode':
+            isSelectMode = !isSelectMode;
+            if (!isSelectMode) {
+                resetSelectMode();
+            }
+            rerenderCurrentGalleryView();
             break;
-        case 'show-signup-form':
-            renderSignUpForm();
+        case 'select-media-item':
+            if (!isSelectMode) return;
+            if (selectedItems.has(id)) {
+                selectedItems.delete(id);
+            } else {
+                selectedItems.add(id);
+            }
+            rerenderCurrentGalleryView();
             break;
-        case 'show-login-form':
-            renderLoginForm();
+        case 'deselect-all-media':
+            selectedItems.clear();
+            rerenderCurrentGalleryView();
             break;
-        case 'show-character-modal':
-            actionTarget.closest('.modal-container')?.remove();
-            renderCharacterModal(modalContainer);
+        case 'delete-selected-media':
+            renderConfirmationModal({
+                title: `Delete ${selectedItems.size} Posts`,
+                message: `Are you sure you want to permanently delete these ${selectedItems.size} posts? This action cannot be undone.`,
+                confirmText: 'Delete',
+                onConfirm: async () => {
+                    try {
+                        await deleteMultipleMedia(Array.from(selectedItems));
+                        showToast(`${selectedItems.size} posts deleted successfully.`);
+                        resetSelectMode();
+                        await renderMainGallery();
+                    } catch (error) {
+                        showToast(`Error deleting posts: ${error.message}`, 'error');
+                    } finally {
+                        actionTarget.closest('.modal-container')?.remove();
+                    }
+                }
+            });
             break;
-        case 'show-media-modal':
-            actionTarget.closest('.modal-container')?.remove();
-            await renderMediaModal(modalContainer);
-            break;
-        case 'show-filter-modal':
-            await renderFilterModal(modalContainer, currentFilters);
-            break;
-        case 'reset-filters':
-            handleResetFilters();
-            break;
-        case 'clear-all-filters':
-            document.dispatchEvent(new CustomEvent('filterschanged', { detail: {} }));
-            break;
-        case 'navigate-home':
-            window.location.hash = '';
-            break;
-        case 'navigate-characters':
-            window.location.hash = '#/characters';
-            break;
-        case 'navigate-character-profile':
-             window.location.hash = `#/character/${id}`;
-            break;
-        case 'view-media':
-            await renderMediaViewerModal(modalContainer, id);
-            break;
-        case 'load-more-media':
-            await renderMainGallery(true);
-            break;
+
+        // --- Single Item Deletes ---
         case 'delete-media':
             renderConfirmationModal({
                 title: 'Delete Post',
@@ -260,7 +319,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         await deleteMedia(id);
                         showToast('Media post deleted successfully.');
                         actionTarget.closest('.modal-container')?.remove();
-                        document.dispatchEvent(new CustomEvent('datachanged'));
+                        await renderMainGallery();
                     } catch (error) {
                         showToast(`Error deleting post: ${error.message}`, 'error');
                     }
@@ -283,17 +342,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             });
             break;
-        case 'clear-search':
-            currentSearchTerm = '';
-            const searchInput = document.querySelector('form[data-form="search"] input');
-            if (searchInput) searchInput.value = '';
-            await router();
-            break;
-        case 'show-edit-character-modal':
-            await renderEditCharacterModal(modalContainer, id);
-            break;
-        case 'show-edit-media-modal':
-            await renderEditMediaModal(modalContainer, id);
+        case 'show-delete-account-modal':
+            renderConfirmationModal({
+                title: 'Delete Account',
+                message: 'Are you absolutely sure? This will permanently delete your account and all of your data. This action cannot be undone.',
+                confirmText: 'Yes, delete my account',
+                onConfirm: async () => {
+                    try {
+                        await deleteUserAccount();
+                        showToast('Account deleted successfully.');
+                        await supabase.auth.signOut();
+                    } catch (error) {
+                        showToast(`Error deleting account: ${error.message}`, 'error');
+                    }
+                }
+            });
             break;
     }
   });
@@ -307,29 +370,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const id = form.dataset.id;
 
     switch (formType) {
-        case 'login':
-            await handleAuthFormSubmit(e, false);
-            break;
-        case 'signup':
-            await handleAuthFormSubmit(e, true);
-            break;
-        case 'create-character':
-            await handleCharacterFormSubmit(e);
-            break;
-        case 'create-media':
-            await handleMediaFormSubmit(e);
-            break;
-        case 'filter':
-            handleFilterFormSubmit(e);
-            break;
-        case 'search':
-            break;
-        case 'edit-character':
-            await handleEditCharacterFormSubmit(e, id);
-            break;
-        case 'edit-media':
-            await handleEditMediaFormSubmit(e, id);
-            break;
+        case 'login': await handleAuthFormSubmit(e, false); break;
+        case 'signup': await handleAuthFormSubmit(e, true); break;
+        case 'create-character': await handleCharacterFormSubmit(e); break;
+        case 'create-media': await handleMediaFormSubmit(e); break;
+        case 'filter': handleFilterFormSubmit(e); break;
+        case 'edit-character': await handleEditCharacterFormSubmit(e, id); break;
+        case 'edit-media': await handleEditMediaFormSubmit(e, id); break;
+        case 'edit-profile': await handleProfileFormSubmit(e); break;
+        case 'change-password': await handleChangePasswordSubmit(e); break;
     }
   });
 
